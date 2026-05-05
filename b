@@ -1,5 +1,3 @@
-Ja i gjithë kodi i plotë:
-
 <!DOCTYPE html>
 <html lang="sq">
 <head>
