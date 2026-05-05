@@ -774,7 +774,7 @@
 <canvas id="bg-canvas"></canvas>
 
 <nav>
-  <div class="nav-logo">BIO — 2024</div>
+  <div class="nav-logo">BIO</div>
   <ul class="nav-links">
     <li><a href="#structure">Qeliza</a></li>
     <li><a href="#specialization">Specializimi</a></li>
@@ -1349,5 +1349,3 @@ document.querySelectorAll('.org-card').forEach(card => {
 </script>
 </body>
 </html>
-
-
