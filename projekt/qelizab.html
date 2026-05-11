@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="sq">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Qeliza — Infinite Zoom</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:#000;width:100vw;height:100vh;overflow:hidden;touch-action:none;user-select:none;font-family:'Courier New',monospace;}
+canvas{display:block;}
+#info{
+  position:fixed;bottom:24px;left:50%;transform:translateX(-50%);
+  background:rgba(0,10,5,0.92);border:1px solid rgba(0,255,120,0.35);
+  color:#b0ffd0;padding:12px 20px;border-radius:14px;max-width:300px;
+  font-size:12px;line-height:1.65;text-align:center;pointer-events:none;
+  opacity:0;transition:opacity 0.35s;backdrop-filter:blur(10px);z-index:99;
+}
+#info.on{opacity:1;}
+#info .ttl{font-size:15px;font-weight:bold;color:#00ffaa;margin-bottom:5px;letter-spacing:.5px;}
+#lbl{position:fixed;top:14px;left:50%;transform:translateX(-50%);
+  color:rgba(0,255,120,0.4);font-size:10px;letter-spacing:3px;pointer-events:none;z-index:99;text-transform:uppercase;}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="lbl">QELIZA BIMORE</div>
+<div id="info"><div class="ttl" id="iname"></div><div id="idesc"></div></div>
+<script>
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+// Cap pixel ratio at 1.5 for performance
+const PR = Math.min(window.devicePixelRatio||1, 1.5);
+let W, H;
+function resize(){
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width  = Math.round(W * PR);
+  canvas.height = Math.round(H * PR);
+  canvas.style.width  = W+'px';
+  canvas.style.height = H+'px';
+  ctx.setTransform(PR,0,0,PR,0,0);
+}
+resize();
+window.addEventListener('resize', resize);
+
+// Pan/zoom
+let panX=0, panY=0, zoom=1;
+const ZOOM_MIN=0.25, ZOOM_MAX=20000;
+function toScreen(wx,wy){ return {x:W/2+(wx+panX)*zoom, y:H/2+(wy+panY)*zoom}; }
+function toWorld(sx,sy){  return {x:(sx-W/2)/zoom-panX,  y:(sy-H/2)/zoom-panY}; }
+function zoomAt(sx,sy,f){
+  const b=toWorld(sx,sy);
+  zoom=Math.max(ZOOM_MIN,Math.min(ZOOM_MAX,zoom*f));
+  const a=toWorld(sx,sy);
+  panX+=a.x-b.x; panY+=a.y-b.y;
+}
+
+// Colour utils
+function lerpColor(h,amt){
+  try{
+    const r=parseInt(h.slice(1,3),16)||0,g=parseInt(h.slice(3,5),16)||0,b=parseInt(h.slice(5,7),16)||0;
+    return `rgb(${Math.min(255,r+amt)},${Math.min(255,g+amt)},${Math.min(255,b+amt)})`;
+  }catch(e){return h;}
+}
+
+let T=0;
+const CELL_R=200;
+
+// ── ORGANELLE TREE ────────────────────────────────────────────────
+// shape: circle | ellipse | blob | ring | stack | crescent | polygon | dna
+// rx,ry: world-space radii  angle: tilt in rad
+// children visible when parent screen-radius > childShow (default 80)
+const DATA = {
+  id:'cell', name:'Qeliza Bimore',
+  desc:'Njësia themelore e jetës bimore. Ka mur qelizor celulozik, membranë, kloroplaste dhe vakuolë qendrore.',
+  shape:'blob', rx:CELL_R, ry:CELL_R, fill:'#071a0e', stroke:'#00cc55', x:0, y:0, childShow:20,
+  children:[
+
+    // CELL WALL – big ring around everything
+    {id:'wall', name:'Muri Qelizor',
+     desc:'Shtresë e trashë celulozike, lignine dhe pektine. Mbron dhe jep formën e qelizës. Mungon në qelizat shtazore.',
+     shape:'ring', rx:CELL_R+10, ry:CELL_R+10, thick:16, fill:'transparent', stroke:'#4a7a2a', x:0, y:0, childShow:60,
+     children:[
+       {id:'cellulose_fibres', name:'Fibra Celulozike',
+        desc:'Polimer linear β(1→4)-glukoze. Fibrat kryqëzohen në laminë duke krijuar strukturë shumë të fortë.',
+        shape:'crescent', rx:50, ry:4, fill:'#2e4e1a', stroke:'#88bb44', x:0, y:-(CELL_R+10), angle:0, childShow:9999,
+        children:[]}
+     ]},
+
+    // PLASMA MEMBRANE
+    {id:'membrane', name:'Membrana Plazmatike',
+     desc:'Shtresë e dyfishtë fosfolipidike me proteina. Kontrollor i gjithë hyrje-daljeve nga qeliza.',
+     shape:'ring', rx:CELL_R, ry:CELL_R, thick:5, fill:'transparent', stroke:'#00ff88', x:0, y:0, childShow:9999,
+     children:[]},
+
+    // NUCLEUS
+    {id:'nucleus', name:'Bërthama (Nucleus)',
+     desc:'Qendra e kontrollit. Përmban ADN dhe drejton sintezën proteike dhe ndarjen qelizore.',
+     shape:'circle', rx:50, ry:50, fill:'#1a083a', stroke:'#9955ff', x:5, y:-48, childShow:60,
+     children:[
+       {id:'n_envelope', name:'Zarhi Bërthamor',
+        desc:'Membranë e dyfishtë me pore. Ndanë bërthamën nga citoplazma.',
+        shape:'ring', rx:50, ry:50, thick:5, fill:'transparent', stroke:'#7733cc', x:0, y:0, childShow:9999, children:[]},
+       {id:'n_pore', name:'Pora Bërthamore',
+        desc:'Kompleks 120 proteinash, diametër ~120 nm. Lejon kalimin selektiv të ARN, proteinave dhe ribozomeve.',
+        shape:'polygon', rx:6, ry:6, sides:8, fill:'#440088', stroke:'#cc77ff', x:38, y:18, childShow:9999, children:[]},
+       {id:'nucleolus', name:'Nukleolusi',
+        desc:'Fabrika e ribozomeve. Prodhon rARN dhe grumbullon proteinat ribozomale. Shumë i dukshëm gjatë rritjes.',
+        shape:'ellipse', rx:14, ry:10, fill:'#550099', stroke:'#ee77ff', x:8, y:6, childShow:9999, children:[]},
+       {id:'chromatin', name:'Kromatina (ADN)',
+        desc:'ADN i mbështjellë rreth histoneve duke formuar nukleozome. Informacioni gjenetik i plotë i organizmit.',
+        shape:'dna', rx:18, ry:18, fill:'#330066', stroke:'#aa44ff', x:-12, y:-10, childShow:80,
+        children:[
+          {id:'nucleosome', name:'Nukleozomi',
+           desc:'146 çifte bazash ADN rreth oktamerit të histoneve. Njësia bazë e kromosomit.',
+           shape:'circle', rx:7, fill:'#5500aa', stroke:'#cc66ff', x:0, y:0, childShow:9999,
+           children:[
+             {id:'histone', name:'Histona H3-H4',
+              desc:'Tetramer bërthamor. Acetilimi i histoneve aktivizon gjenet; metilimi i çaktivizon.',
+              shape:'polygon', rx:3.5, sides:8, fill:'#7700bb', stroke:'#ee88ff', x:0, y:0, childShow:9999, children:[]}
+           ]}
+        ]}
+     ]},
+
+    // CHLOROPLAST
+    {id:'chloroplast', name:'Kloroplasti',
+     desc:'Plastid jeshil. Kryen fotosintezën: 6CO₂ + 6H₂O + dritë → C₆H₁₂O₆ + 6O₂.',
+     shape:'ellipse', rx:42, ry:24, fill:'#0a2e0a', stroke:'#22cc22', x:-98, y:58, angle:0.3, childShow:60,
+     children:[
+       {id:'chl_outer', name:'Membrana e Jashtme',
+        desc:'Shumë permeabël. Lejon hyrjen e CO₂, ujit dhe metabolitëve të vegjël.',
+        shape:'ring', rx:42, ry:24, thick:3, fill:'transparent', stroke:'#1a881a', x:0, y:0, angle:0.3, childShow:9999, children:[]},
+       {id:'stroma', name:'Stroma',
+        desc:'Lëngu i brendshëm. Cikli i Kalvinit (RuBisCO + CO₂ → G3P → glukozë) ndodh këtu.',
+        shape:'ellipse', rx:34, ry:18, fill:'#0d3d0d', stroke:'#339933', x:0, y:0, angle:0.3, childShow:80,
+        children:[
+          {id:'granum', name:'Granum (Trakti Tilakoid)',
+           desc:'Kulla disku-membranike. Klorofila absorbon fotone dhe nis reaksionin e dritës.',
+           shape:'stack', rx:13, ry:4, layers:6, fill:'#1a6e1a', stroke:'#44ff44', x:0, y:0, childShow:9999,
+           children:[
+             {id:'chlorophyll', name:'Klorofila a/b',
+              desc:'Pigment porfirinik me Mg²⁺ në qendër. Absorbon maksimalisht dritë të kuqe (680nm) dhe blu (430nm).',
+              shape:'polygon', rx:4, sides:6, fill:'#22cc22', stroke:'#88ff88', x:0, y:0, childShow:9999, children:[]}
+           ]},
+          {id:'rubisco', name:'RuBisCO',
+           desc:'Enzima më e bollshme në Tokë. Katalizon fiksimin e CO₂ në cikël Kalvinit. Shumë e ngadalshme: 3–10 reaksione/sec.',
+           shape:'polygon', rx:5, sides:6, fill:'#2a5e2a', stroke:'#55cc55', x:-10, y:5, childShow:9999, children:[]}
+        ]}
+     ]},
+
+    // MITOCHONDRIA
+    {id:'mito', name:'Mitokondria',
+     desc:'Qendra e energjisë. Frymëmarrja aerobike prodhon ~30 ATP për molekulë glukozë.',
+     shape:'ellipse', rx:33, ry:18, fill:'#2a0a00', stroke:'#ff6600', x:98, y:62, angle:-0.2, childShow:60,
+     children:[
+       {id:'mito_outer', name:'Membrana e Jashtme',
+        desc:'Porina bën të permeabël ndaj molekulave <5 kDa. Zbërthen lipide dhe transferon metabolitë.',
+        shape:'ring', rx:33, ry:18, thick:3, fill:'transparent', stroke:'#cc4400', x:0, y:0, angle:-0.2, childShow:9999, children:[]},
+       {id:'matrix', name:'Matrix Mitokondrial',
+        desc:'Ka enzima të ciklit të Krebsit, ADN mitokondriale (37 gjene) dhe ribozome 70S.',
+        shape:'ellipse', rx:25, ry:12, fill:'#3d1500', stroke:'#ff4400', x:0, y:0, angle:-0.2, childShow:80,
+        children:[
+          {id:'cristae', name:'Kristat',
+           desc:'Palosje të membranës së brendshme. Rrisin sipërfaqen 5×. Zinxhiri i elektroneve (Kompleksi I–IV) ndodh këtu.',
+           shape:'crescent', rx:16, ry:5, fill:'#662200', stroke:'#ff7722', x:0, y:0, childShow:9999,
+           children:[
+             {id:'atp_syn', name:'ATP Sintaza (F₁F₀)',
+              desc:'Motor molekular rotues. 3 ATP formohen për çdo rrotullim të plotë (360°). I drejton flux protonike.',
+              shape:'polygon', rx:5, sides:12, fill:'#994400', stroke:'#ffaa44', x:0, y:0, childShow:9999, children:[]}
+           ]},
+          {id:'mito_dna', name:'ADN Mitokondrial',
+           desc:'ADN qarkore, 16.569 bp te njeriu. Trashëgohet vetëm nga nëna. Kodon 13 proteina respiratore.',
+           shape:'dna', rx:8, fill:'#551100', stroke:'#ff6633', x:8, y:-4, childShow:9999, children:[]}
+        ]}
+     ]},
+
+    // GOLGI
+    {id:'golgi', name:'Aparati i Golxhit',
+     desc:'Sistemi "postar" i qelizës. Modifikon proteinat (N-glikozilje, sulfatim) dhe i dërgon drejt destinacionit.',
+     shape:'stack', rx:38, ry:6, layers:6, fill:'#2a2000', stroke:'#ddaa00', x:-25, y:108, angle:0.1, childShow:60,
+     children:[
+       {id:'cisternae', name:'Cisterna (cis→medial→trans)',
+        desc:'7 shtresa. Proteinat hyjnë nga ana cis (afër ER) dhe dalin nga ana trans si vezikula sekretuese.',
+        shape:'ellipse', rx:30, ry:5, fill:'#3d2e00', stroke:'#ccaa00', x:0, y:0, childShow:9999,
+        children:[
+          {id:'vesicle_g', name:'Vesikulë Sekretuese',
+           desc:'Flluskë 50–100 nm e veshur me klatrinë ose COPI/COPII. Dërgon kargon drejt membranës ose lizozomit.',
+           shape:'circle', rx:6, fill:'#665500', stroke:'#ffcc00', x:34, y:0, childShow:9999, children:[]}
+        ]}
+     ]},
+
+    // ROUGH ER
+    {id:'rer', name:'ER i Ashpër (RER)',
+     desc:'Membranë me ribozome mbi sipërfaqe. Sintetizon proteina sekretuese, membranore dhe lizozomale.',
+     shape:'crescent', rx:40, ry:13, fill:'#001a3a', stroke:'#3399ff', x:62, y:-98, angle:0.55, childShow:60,
+     children:[
+       {id:'rer_ribo', name:'Ribozom mbi ER',
+        desc:'Ribozomi 80S i lidhur me kanalin translocon në membranë. Injekton peptidin direkt brenda ER.',
+        shape:'ellipse', rx:5, ry:3, fill:'#334400', stroke:'#aacc00', x:0, y:-13, childShow:9999,
+        children:[
+          {id:'s_40', name:'Nënnjësia 40S',
+           desc:'Ngërthen mARN. Dekodon kodonët duke krahasuar me antikodonin e ARNt-së.',
+           shape:'ellipse', rx:3, ry:2, fill:'#445500', stroke:'#ccdd00', x:-2, y:0, childShow:9999, children:[]},
+          {id:'s_60', name:'Nënnjësia 60S',
+           desc:'Katalizon lidhjen peptidike. Kanali i daljes drejton peptidin 57 Å brenda ER.',
+           shape:'ellipse', rx:3, ry:2, fill:'#556600', stroke:'#ddee00', x:2, y:0, childShow:9999, children:[]}
+        ]}
+     ]},
+
+    // SMOOTH ER
+    {id:'ser', name:'ER i Lëmuar (SER)',
+     desc:'Pa ribozome. Sintetizon fosfolipide dhe kolesterol, metabolizon ilaçet dhe alkoolin, rregullon Ca²⁺.',
+     shape:'crescent', rx:28, ry:9, fill:'#001025', stroke:'#0055cc', x:95, y:-52, angle:1.25, childShow:9999, children:[]},
+
+    // CENTRAL VACUOLE
+    {id:'vacuole', name:'Vakuola Qendrore',
+     desc:'Zë 80–90% të vëllimit qelizor bimore. Ruan ujin (turgori), pigmentet (antociane), mbetjet toksike dhe ushqimet.',
+     shape:'circle', rx:58, ry:58, fill:'#001824', stroke:'#0099cc', x:18, y:46, childShow:60,
+     children:[
+       {id:'tonoplast', name:'Tonoplasti',
+        desc:'Membrana e vakuolës. Ka aquaporina (TIP), pompa H⁺-ATPazë dhe transportues të sheqernave.',
+        shape:'ring', rx:58, ry:58, thick:4, fill:'transparent', stroke:'#0077aa', x:0, y:0, childShow:80,
+        children:[
+          {id:'aquaporin', name:'Aquaporina (TIP)',
+           desc:'Kanal selektiv për ujin. Rrjeti i 6 α-helixeve krijon kanalin 2.8 Å. 3 miliardë H₂O/sekondë.',
+           shape:'polygon', rx:5, sides:6, fill:'#004466', stroke:'#00ccee', x:42, y:18, childShow:9999, children:[]}
+        ]}
+     ]},
+
+    // FREE RIBOSOMES
+    {id:'free_ribo', name:'Ribozome të Lira',
+     desc:'Ribozome 80S të shpërndara në citoplazma. Sintetizon proteina citoplazmike si enzimat e glikolizës.',
+     shape:'ellipse', rx:9, ry:6, fill:'#334400', stroke:'#aacc00', x:-85, y:-78, childShow:80,
+     children:[
+       {id:'polysome', name:'Polizoma',
+        desc:'Zinxhir ribozomesh mbi të njëjtin mARN. 5–70 ribozome njëherësh prodhojnë shumë kopje të proteinës.',
+        shape:'ellipse', rx:6, ry:4, fill:'#445500', stroke:'#bbdd00', x:0, y:0, childShow:9999, children:[]}
+     ]},
+
+    // CYTOSKELETON
+    {id:'cytosk', name:'Citoskeleti — Mikrotubule',
+     desc:'Tuba tubulinë α+β, diametër 25 nm. Formojnë bushin mitotik, drejtojnë kiainës/dyneinës dhe vesikulave.',
+     shape:'crescent', rx:32, ry:5, fill:'#1a1a2e', stroke:'#6666ff', x:118, y:-22, angle:0.85, childShow:80,
+     children:[
+       {id:'tubulin', name:'Dimer α/β Tubulinë',
+        desc:'Polimerizon me GTP. Gjatësia e tubulit rritet (polimerizim) ose shkurtohet (katastrofë) dinamikisht.',
+        shape:'ellipse', rx:5, ry:3, fill:'#2a2a55', stroke:'#8888ff', x:0, y:0, childShow:9999, children:[]}
+     ]},
+
+    // PEROXISOME
+    {id:'perox', name:'Peroksizomi',
+     desc:'Zbërthen acide yndyrore me β-oksidim dhe H₂O₂ toksike me katalazë. Bashkëvepron me mitokondrinë.',
+     shape:'circle', rx:13, fill:'#1a1400', stroke:'#ccaa00', x:-128, y:6, childShow:80,
+     children:[
+       {id:'catalase', name:'Katalaza',
+        desc:'Enzima homodimerë. Zbërthen 40 milion H₂O₂/sec: 2H₂O₂ → 2H₂O + O₂. Mbrojtësi kryesor antioksidant.',
+        shape:'polygon', rx:5, sides:4, fill:'#332800', stroke:'#ddbb00', x:0, y:0, childShow:9999, children:[]}
+     ]},
+
+    // PLASMODESMATA
+    {id:'plasmo', name:'Plasmodesma',
+     desc:'Kanal citoplazmatik mes dy qelizave bimore. Lejon komunikimin dhe transportin e molekulave deri 1 kDa.',
+     shape:'polygon', rx:7, sides:6, fill:'#1a2a1a', stroke:'#44aa44', x:CELL_R-5, y:30, childShow:9999, children:[]}
+  ]
+};
+
+// ── Draw functions ────────────────────────────────────────────────
+function glow(c,b){ctx.shadowColor=c;ctx.shadowBlur=b;}
+function noGlow(){ctx.shadowBlur=0;}
+
+function radGrad(x,y,r,fill){
+  const g=ctx.createRadialGradient(x-r*0.3,y-r*0.3,r*0.05,x,y,r);
+  g.addColorStop(0,lerpColor(fill,40));g.addColorStop(1,fill);
+  return g;
+}
+
+// shape drawers (all in SCREEN coords, already transformed)
+function drawCircle(x,y,r,fill,stroke,a){
+  if(r<1)return;
+  ctx.save();ctx.globalAlpha=a;
+  ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);
+  if(fill!=='transparent'){ctx.fillStyle=radGrad(x,y,r,fill);ctx.fill();}
+  ctx.strokeStyle=stroke;ctx.lineWidth=Math.max(1,r*0.045);
+  glow(stroke,r*0.55);ctx.stroke();noGlow();
+  ctx.restore();
+}
+
+function drawEllipse2(x,y,rx,ry,angle,fill,stroke,a){
+  if(rx<1)return;
+  ctx.save();ctx.globalAlpha=a;
+  ctx.translate(x,y);ctx.rotate(angle||0);
+  ctx.beginPath();ctx.ellipse(0,0,rx,ry,0,0,Math.PI*2);
+  if(fill!=='transparent'){ctx.fillStyle=radGrad(0,0,rx,fill);ctx.fill();}
+  ctx.strokeStyle=stroke;ctx.lineWidth=Math.max(1,rx*0.045);
+  glow(stroke,rx*0.5);ctx.stroke();noGlow();
+  ctx.restore();
+}
+
+function drawBlob2(x,y,rx,ry,fill,stroke,a){
+  if(rx<1)return;
+  ctx.save();ctx.globalAlpha=a;
+  const n=60;
+  ctx.beginPath();
+  for(let i=0;i<=n;i++){
+    const ang=(i/n)*Math.PI*2;
+    const w=1+0.04*Math.sin(ang*3+T*0.4)+0.025*Math.sin(ang*7-T*0.25);
+    const px2=x+Math.cos(ang)*rx*w,py2=y+Math.sin(ang)*ry*w;
+    i===0?ctx.moveTo(px2,py2):ctx.lineTo(px2,py2);
+  }
+  ctx.closePath();
+  if(fill!=='transparent'){ctx.fillStyle=radGrad(x,y,rx,fill);ctx.fill();}
+  ctx.strokeStyle=stroke;ctx.lineWidth=Math.max(1,rx*0.03);
+  glow(stroke,rx*0.4);ctx.stroke();noGlow();
+  ctx.restore();
+}
+
+function drawRing2(x,y,rx,ry,thick,stroke,a,angle){
+  if(rx<2)return;
+  ctx.save();ctx.globalAlpha=a;
+  ctx.translate(x,y);ctx.rotate(angle||0);
+  ctx.beginPath();ctx.ellipse(0,0,rx,ry,0,0,Math.PI*2);
+  ctx.strokeStyle=stroke;ctx.lineWidth=thick||Math.max(2,rx*0.07);
+  glow(stroke,rx*0.4);ctx.stroke();noGlow();
+  ctx.restore();
+}
+
+function drawStack2(x,y,rx,ry,layers,fill,stroke,a,angle){
+  if(rx<2)return;
+  const n=layers||5;
+  ctx.save();ctx.globalAlpha=a;
+  ctx.translate(x,y);ctx.rotate(angle||0);
+  const sp=ry*2.5;
+  for(let i=0;i<n;i++){
+    const oy=(i-(n-1)/2)*sp;
+    const wave=Math.sin(T*0.5+i)*ry*0.25;
+    ctx.beginPath();ctx.ellipse(wave,oy,rx,ry,0,0,Math.PI*2);
+    const g2=ctx.createRadialGradient(-rx*0.3,oy-ry*0.3,rx*0.05,0,oy,rx);
+    g2.addColorStop(0,lerpColor(fill,40));g2.addColorStop(1,fill);
+    ctx.fillStyle=g2;ctx.fill();
+    ctx.strokeStyle=stroke;ctx.lineWidth=Math.max(1,ry*0.6);
+    glow(stroke,ry*2);ctx.stroke();noGlow();
+  }
+  ctx.restore();
+}
+
+function drawCrescent2(x,y,rx,ry,fill,stroke,a,angle){
+  if(rx<2)return;
+  ctx.save();ctx.globalAlpha=a;
+  ctx.translate(x,y);ctx.rotate(angle||0);
+  const rows=4;
+  for(let i=0;i<rows;i++){
+    const t2=i/(rows-1);
+    const cy2=(t2-0.5)*ry*3.2;
+    const rxl=rx*(0.55+0.45*(1-Math.abs(t2-0.5)*2));
+    ctx.beginPath();ctx.ellipse(0,cy2,rxl,ry*0.55,0,0,Math.PI*2);
+    const g3=ctx.createRadialGradient(0,cy2,rxl*0.1,0,cy2,rxl);
+    g3.addColorStop(0,lerpColor(fill,30));g3.addColorStop(1,fill);
+    ctx.fillStyle=g3;ctx.fill();
+    ctx.strokeStyle=stroke;ctx.lineWidth=Math.max(1,ry*0.4);
+    glow(stroke,ry*1.5);ctx.stroke();noGlow();
+  }
+  ctx.restore();
+}
+
+function drawPolygon2(x,y,r,sides,fill,stroke,a,angle){
+  if(r<1)return;
+  ctx.save();ctx.globalAlpha=a;
+  ctx.translate(x,y);ctx.rotate((angle||0)+T*0.35);
+  ctx.beginPath();
+  for(let i=0;i<sides;i++){
+    const ang=(i/sides)*Math.PI*2-Math.PI/2;
+    i===0?ctx.moveTo(Math.cos(ang)*r,Math.sin(ang)*r):ctx.lineTo(Math.cos(ang)*r,Math.sin(ang)*r);
+  }
+  ctx.closePath();
+  const g4=ctx.createRadialGradient(-r*0.3,-r*0.3,r*0.05,0,0,r);
+  g4.addColorStop(0,lerpColor(fill,40));g4.addColorStop(1,fill);
+  ctx.fillStyle=g4;ctx.fill();
+  ctx.strokeStyle=stroke;ctx.lineWidth=Math.max(1,r*0.12);
+  glow(stroke,r*0.55);ctx.stroke();noGlow();
+  ctx.restore();
+}
+
+function drawDNA(x,y,r,fill,stroke,a){
+  // Double-helix representation
+  if(r<4)return;
+  ctx.save();ctx.globalAlpha=a;
+  const h=r*1.8,steps=40;
+  // strand 1
+  ctx.beginPath();
+  for(let i=0;i<=steps;i++){
+    const t2=i/steps;
+    const px2=x+Math.sin(t2*Math.PI*4+T*0.6)*r*0.7;
+    const py2=y-h/2+t2*h;
+    i===0?ctx.moveTo(px2,py2):ctx.lineTo(px2,py2);
+  }
+  ctx.strokeStyle=stroke;ctx.lineWidth=Math.max(1.5,r*0.1);
+  glow(stroke,r*0.4);ctx.stroke();noGlow();
+  // strand 2
+  ctx.beginPath();
+  for(let i=0;i<=steps;i++){
+    const t2=i/steps;
+    const px2=x+Math.sin(t2*Math.PI*4+T*0.6+Math.PI)*r*0.7;
+    const py2=y-h/2+t2*h;
+    i===0?ctx.moveTo(px2,py2):ctx.lineTo(px2,py2);
+  }
+  ctx.strokeStyle=lerpColor(fill,80);ctx.lineWidth=Math.max(1.5,r*0.1);
+  glow(lerpColor(fill,80),r*0.4);ctx.stroke();noGlow();
+  // rungs
+  ctx.strokeStyle=lerpColor(fill,50);ctx.lineWidth=Math.max(1,r*0.06);
+  for(let i=0;i<10;i++){
+    const t2=i/9;
+    const x1=x+Math.sin(t2*Math.PI*4+T*0.6)*r*0.7;
+    const x2=x+Math.sin(t2*Math.PI*4+T*0.6+Math.PI)*r*0.7;
+    const py2=y-h/2+t2*h;
+    ctx.beginPath();ctx.moveTo(x1,py2);ctx.lineTo(x2,py2);ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawLabel2(x,y,r,name,a){
+  const fade=Math.min(1,(r-12)/22)*a;
+  if(fade<0.06)return;
+  const fs=Math.min(13,Math.max(8,r*0.2));
+  ctx.save();ctx.globalAlpha=fade;
+  ctx.font=`${fs}px 'Courier New'`;
+  ctx.fillStyle='#c0ffd8';ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.shadowColor='#00ff88';ctx.shadowBlur=4;
+  ctx.fillText(name.split('(')[0].split('/')[0].trim(),x,y);
+  ctx.restore();
+}
+
+// ── Render a node in screen space ────────────────────────────────
+function renderNode(node, wx, wy, parentAlpha){
+  const s=toScreen(wx,wy);
+  const sx=s.x, sy=s.y;
+  const sr=node.rx*zoom;
+  const sFadeIn=4, sFull=16;
+  const a=parentAlpha*Math.min(1,(sr-sFadeIn)/(sFull-sFadeIn));
+  if(a<=0||sr<1.5)return;
+
+  const f=node.fill||'#111', st=node.stroke||'#fff';
+  const sry=(node.ry||node.rx)*zoom;
+  const ang=node.angle||0;
+
+  switch(node.shape){
+    case 'blob':    drawBlob2(sx,sy,sr,sry,f,st,a); break;
+    case 'circle':  drawCircle(sx,sy,sr,f,st,a); break;
+    case 'ellipse': drawEllipse2(sx,sy,sr,sry,ang,f,st,a); break;
+    case 'ring':    drawRing2(sx,sy,sr,sry,node.thick?node.thick*zoom:null,st,a,ang); break;
+    case 'stack':   drawStack2(sx,sy,sr,sry,node.layers,f,st,a,ang); break;
+    case 'crescent':drawCrescent2(sx,sy,sr,sry,f,st,a,ang); break;
+    case 'polygon': drawPolygon2(sx,sy,sr,node.sides||6,f,st,a,ang); break;
+    case 'dna':     drawDNA(sx,sy,sr,f,st,a); break;
+  }
+  drawLabel2(sx,sy,sr,node.name,a);
+
+  const childThr=(node.childShow!==undefined?node.childShow:80)*zoom/zoom; // world thresh × zoom
+  // use childShow as screen-radius threshold
+  const csThresh=node.childShow!==undefined?node.childShow:80;
+  if(sr>csThresh && node.children && node.children.length){
+    const cf=Math.min(1,(sr-csThresh)/50);
+    node.children.forEach(c=>renderNode(c,wx+c.x,wy+c.y,a*cf));
+  }
+}
+
+// ── Starfield ─────────────────────────────────────────────────────
+const STARS=Array.from({length:150},()=>({
+  wx:(Math.random()-0.5)*3000,wy:(Math.random()-0.5)*3000,
+  r:Math.random()*1.1+0.3,a:Math.random()*0.45+0.15
+}));
+function drawStars(){
+  const v=Math.max(0,1-(zoom-0.4)*2.8);if(v<0.01)return;
+  ctx.save();ctx.globalAlpha=v;
+  STARS.forEach(s=>{
+    const p=toScreen(s.wx,s.wy);
+    ctx.beginPath();ctx.arc(p.x,p.y,s.r,0,Math.PI*2);
+    ctx.fillStyle=`rgba(140,255,185,${s.a})`;ctx.fill();
+  });
+  ctx.restore();
+}
+
+// ── Depth label ───────────────────────────────────────────────────
+const lblEl=document.getElementById('lbl');
+function updateLabel(){
+  const w=toWorld(W/2,H/2);
+  let best=DATA, bestR=DATA.rx;
+  function chk(n,ox,oy){
+    if(!n||n.shape==='ring')return;
+    const d=Math.hypot((w.x-ox)/n.rx,(w.y-oy)/(n.ry||n.rx));
+    if(d<1.05&&n.rx<bestR){best=n;bestR=n.rx;}
+    if(n.children)n.children.forEach(c=>chk(c,ox+c.x,oy+c.y));
+  }
+  chk(DATA,0,0);
+  lblEl.textContent=best.name.split('(')[0].toUpperCase().trim();
+}
+
+// ── Main loop ─────────────────────────────────────────────────────
+let lastFrame=0;
+function frame(ts){
+  T=ts*0.001;
+  ctx.clearRect(0,0,W,H);
+  // Background
+  const bg=ctx.createRadialGradient(W/2,H/2,0,W/2,H/2,Math.max(W,H)*0.7);
+  bg.addColorStop(0,'#010b06');bg.addColorStop(1,'#000000');
+  ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);
+  drawStars();
+  renderNode(DATA,0,0,1);
+  updateLabel();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// ── Info popup ────────────────────────────────────────────────────
+const panel=document.getElementById('info');
+const iname=document.getElementById('iname');
+const idesc=document.getElementById('idesc');
+let infoTimer;
+function showInfo(n){
+  if(!n)return;
+  iname.textContent=n.name;
+  idesc.textContent=n.desc||'';
+  panel.classList.add('on');
+  clearTimeout(infoTimer);
+  infoTimer=setTimeout(()=>panel.classList.remove('on'),6000);
+}
+
+// Hit test: smallest node containing world point
+function hitTest(sx,sy){
+  const w=toWorld(sx,sy);
+  let best=null,bestR=Infinity;
+  function chk(n,ox,oy){
+    const d=Math.hypot((w.x-ox)/(n.rx||1),(w.y-oy)/((n.ry||n.rx)||1));
+    const inside=n.shape==='ring'?(d>0.8&&d<1.2):(d<1.1);
+    if(inside&&n.rx<bestR){best=n;bestR=n.rx;}
+    if(n.children)n.children.forEach(c=>chk(c,ox+c.x,oy+c.y));
+  }
+  chk(DATA,0,0);
+  return best;
+}
+
+// ── Mouse ─────────────────────────────────────────────────────────
+let drag=false,lm={x:0,y:0},moved=false;
+canvas.addEventListener('mousedown',e=>{drag=true;lm={x:e.clientX,y:e.clientY};moved=false;});
+canvas.addEventListener('mousemove',e=>{
+  if(!drag)return;
+  if(Math.hypot(e.clientX-lm.x,e.clientY-lm.y)>3)moved=true;
+  panX+=(e.clientX-lm.x)/zoom;panY+=(e.clientY-lm.y)/zoom;
+  lm={x:e.clientX,y:e.clientY};
+});
+window.addEventListener('mouseup',e=>{
+  if(!moved){const n=hitTest(e.clientX,e.clientY);if(n)showInfo(n);}
+  drag=false;
+});
+canvas.addEventListener('wheel',e=>{e.preventDefault();zoomAt(e.clientX,e.clientY,e.deltaY<0?1.13:1/1.13);},{passive:false});
+
+// ── Touch ─────────────────────────────────────────────────────────
+let pinching=false,lastDist=0,lastCX=0,lastCY=0;
+let tStart={x:0,y:0},tMoved=false;
+canvas.addEventListener('touchstart',e=>{
+  e.preventDefault();tMoved=false;
+  if(e.touches.length===1){
+    const t=e.touches[0];tStart={x:t.clientX,y:t.clientY};
+    lm={x:t.clientX,y:t.clientY};drag=true;pinching=false;
+  }else if(e.touches.length>=2){
+    drag=false;pinching=true;
+    lastDist=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);
+    lastCX=(e.touches[0].clientX+e.touches[1].clientX)/2;
+    lastCY=(e.touches[0].clientY+e.touches[1].clientY)/2;
+  }
+},{passive:false});
+canvas.addEventListener('touchmove',e=>{
+  e.preventDefault();tMoved=true;
+  if(e.touches.length===1&&drag){
+    const t=e.touches[0];
+    panX+=(t.clientX-lm.x)/zoom;panY+=(t.clientY-lm.y)/zoom;
+    lm={x:t.clientX,y:t.clientY};
+  }else if(e.touches.length>=2&&pinching){
+    const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);
+    const cx2=(e.touches[0].clientX+e.touches[1].clientX)/2;
+    const cy2=(e.touches[0].clientY+e.touches[1].clientY)/2;
+    zoomAt(cx2,cy2,d/lastDist);
+    panX+=(cx2-lastCX)/zoom;panY+=(cy2-lastCY)/zoom;
+    lastDist=d;lastCX=cx2;lastCY=cy2;
+  }
+},{passive:false});
+canvas.addEventListener('touchend',e=>{
+  e.preventDefault();
+  if(!tMoved&&e.changedTouches.length===1){
+    const t=e.changedTouches[0];
+    if(Math.hypot(t.clientX-tStart.x,t.clientY-tStart.y)<10){
+      showInfo(hitTest(t.clientX,t.clientY));
+    }
+  }
+  drag=false;pinching=false;
+},{passive:false});
+</script>
+</body>
+</html>
